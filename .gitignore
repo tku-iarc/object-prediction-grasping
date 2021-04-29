@@ -1,0 +1,10 @@
+*.png
+result
+*.jpg
+catkin_workspace/
+*.pth
+*.pyc
+devel/
+build/
+.catkin_workspace
+
