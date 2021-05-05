@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 ###############################mike
-from tensorflow.keras.models import Sequential, model_from_json
+
+#from tensorflow.keras.models import Sequential, model_from_json
 import rospy
 import math
 from get_rs_image import Get_image
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge, CvBridgeError
 import sys
-sys.path.insert(1, "/home/iclab/.local/lib/python3.6/site-packages/")
-
+sys.path.insert(1, "/home/chien/.local/lib/python3.6/site-packages/")
+from sort_data import Sort_data
 ##################################
 from data import COCODetection, get_label_map, MEANS, COLORS
 from yolact import Yolact
@@ -53,7 +54,7 @@ def parse_args(argv=None):
     parser = argparse.ArgumentParser(
         description='YOLACT COCO Evaluation')
     parser.add_argument('--trained_model',
-                        default='/home/iclab/ros_yolact/src/yolact/src/weights/yolact_base_199_50000.pth', type=str,
+                        default='/home/chien/graduate_program/src/yolact/src/weights/yolact_base_597_80000.pth', type=str,
                         help='Trained state_dict file path to open. If "interrupt", this will open the interrupt file.')
     parser.add_argument('--top_k', default=100, type=int,
                         help='Further restrict the number of predictions to parse')
@@ -174,6 +175,41 @@ flag = False
 misx = []
 misy=[] 
 
+old_obj_info = [[ [] for i in range(0)] for j in range(20)]
+for i in range(20):
+    old_obj_info[i] = [i] 
+    for k in range(3):
+        old_obj_info[i].append(0)
+    old_obj_info[i].append([0,0,0,0,0,0])
+    for j in range(2):   
+        old_obj_info[i].append([]) 
+
+
+
+#------------------------------------------------------------------------
+mask_flag = False
+
+origin_data = [[ [] for i in range(0)] for j in range(20)]
+compare_data = [[ [] for i in range(0)] for j in range(20)]
+old_obj_count = 0
+total_count = 0
+for i in range(20):
+    #---------------------ID---------------------
+    origin_data[i] = [i]
+    compare_data[i] = [i]
+    #--------------------------------------------
+    for k in range(3):
+        origin_data[i].append(0)
+        compare_data[i].append(0)
+
+    origin_data[i].append([0,0,0,0,0,0])
+    compare_data[i].append([0,0,0,0,0,0])  
+
+    for j in range(2):   
+        origin_data[i].append([])
+        compare_data[i].append([])
+#---------------------------------------------------------------
+
 
 def trans_degree(x,y,degree):
     
@@ -240,6 +276,158 @@ def plot_data(real_posX,real_posY, pre_posX, pre_posY):
     plt.legend()
     plt.savefig('low_speed.png')
 
+def Compare_Data(old_data, new_data, old_count, new_count):
+    global origin_data
+    num = 0
+    list_info = []
+    data_set = [[ [] for i in range(0)] for j in range(20)]
+    for i in range(20):
+        data_set[i] = [i] 
+        for k in range(3):
+            data_set[i].append(0)
+        data_set[i].append([0,0,0,0,0,0])
+        for j in range(2):   
+            data_set[i].append([]) 
+
+    for i in range(new_count):
+        distance = []
+        for j in range(old_count):
+            distance.append(np.sqrt( pow((new_data[i][4][0] - old_data[j][4][0]),2) +  pow((new_data[i][4][1] - old_data[j][4][1]),2) ))
+
+        if distance != []:
+            min_id = distance.index(min(distance))
+            
+            if distance[min_id] < 30:
+
+                if new_data[i][1] == old_data[min_id][1]:   
+                    #currect object
+                    data_set[min_id] = old_data[min_id]
+                    '''
+                    data_set[min_id] = new_data[i]
+                    data_set[min_id][0] = min_id
+                    '''
+                   
+                else:
+                    #new object
+                    data_set[20-1-num] = new_data[i]
+                    data_set[20-1-num][0] = 20-1-num
+                    num+=1
+                    
+            else: 
+                #other the same object, origin object is disapear
+                data_set[20-1-num] = new_data[i]
+                data_set[20-1-num][0] = 20-1-num
+                num+=1 
+                
+    if num != 0: 
+        for i in range(20):
+            if data_set[i][1] == 0:
+                list_info.append(i)
+        for i in range(num):
+            #change obj info
+            data_set[list_info[i]], data_set[20-1-i] = data_set[20-1-i], data_set[list_info[i]] 
+            data_set[list_info[i]][0], data_set[20-1-i][0] = data_set[20-1-i][0], data_set[list_info[i]][0] 
+    
+    if new_count < old_count:
+        total_obj = old_count  
+    total_obj = new_count 
+
+    new_data = data_set
+    return new_data, total_obj
+
+def data_save( mask_picture, classes, names, scorces, boxes):
+    global origin_data, compare_data ,first_frame  , old_obj_count
+    new_obj_count = 0
+    total_count = 0
+    compare_data = [[ [] for i in range(0)] for j in range(20)]
+    for i in range(20):
+        compare_data[i] = [i]
+        for k in range(3):
+            compare_data[i].append(0)
+        compare_data[i].append([0,0,0,0,0,0])  
+        for j in range(2):   
+            compare_data[i].append([])
+
+    if first_frame == False:
+        for i in range(len(classes)):
+            origin_data[i][1] = names[i]
+            origin_data[i][2] = scorces[i]
+            #origin_data[i][3] = mask_picture
+            x1,y1,x2,y2 = boxes[i, :]
+            origin_data[i][4] = [(x1+x2)/2, (y1+y2)/2, x1, x2, y1, y2]
+            old_obj_count+=1
+        new_data = origin_data
+        first_frame = True
+    else:
+        for i in range(len(classes)):
+            compare_data[i][1] = names[i]
+            compare_data[i][2] = scorces[i]
+            #compare_data[i][3] = mask_picture
+            x1,y1,x2,y2 = boxes[i, :]
+            compare_data[i][4] = [(x1+x2)/2, (y1+y2)/2, x1, x2, y1, y2]
+            new_obj_count+=1
+        
+        #new_data, total_count = Compare_Data(origin_data, compare_data, old_obj_count, new_obj_count)       
+        num = 0
+        list_info = []
+        data_set = [[ [] for i in range(0)] for j in range(20)]
+        for i in range(20):
+            data_set[i] = [i] 
+            for k in range(3):
+                data_set[i].append(0)
+            data_set[i].append([0,0,0,0,0,0])
+            for j in range(2):   
+                data_set[i].append([]) 
+
+        for i in range(new_obj_count):
+            distance = []
+            for j in range(old_obj_count):
+                distance.append(np.sqrt( pow((compare_data[i][4][0] - origin_data[j][4][0]),2) +  pow((compare_data[i][4][1] - origin_data[j][4][1]),2) ))
+
+            if distance != []:
+                min_id = distance.index(min(distance))
+                
+                if distance[min_id] < 20:
+
+                    if compare_data[i][1] == origin_data[min_id][1]:   
+                        #currect object
+                        data_set[min_id] = compare_data[i]
+                        data_set[min_id][0] = min_id
+                        data_set[min_id][5] = origin_data[min_id][5] 
+                        data_set[min_id][6] = origin_data[min_id][6]         
+                    else:
+                        #new object
+                        data_set[20-1-num] = compare_data[i]
+                        data_set[20-1-num][0] = 20-1-num
+                        num+=1
+                        
+                else: 
+                    #other the same object, origin object is disapear
+                    data_set[20-1-num] = compare_data[i]
+                    data_set[20-1-num][0] = 20-1-num
+                    num+=1 
+                    
+        if num != 0: 
+            for i in range(3):
+                if data_set[i][1] == 0:
+                    list_info.append(i)
+            for i in range(num):
+                #change obj info
+                data_set[list_info[i]], data_set[20-1-i] = data_set[20-1-i], data_set[list_info[i]] 
+                data_set[list_info[i]][0], data_set[20-1-i][0] = data_set[20-1-i][0], data_set[list_info[i]][0] 
+        
+        if new_obj_count < old_obj_count:
+            total_obj = old_obj_count  
+        total_obj = new_obj_count 
+        compare_data = data_set
+
+        origin_data = compare_data
+        old_obj_count = new_obj_count
+        total_count = total_obj
+    return compare_data, total_count
+
+
+'''
 def data_save(img_info, classes, scores, boxes):
     global old_data, new_data, first_frame, count, old_count
     
@@ -253,13 +441,6 @@ def data_save(img_info, classes, scores, boxes):
             test[i].append(0)
         test[i].append((0,0))
         new_data[i].append((0,0)) 
-
-        '''
-        for j in range(3):
-            test[i].append([0]) 
-            new_data[i].append([0]) 
-        '''   
-
     num = 0
     num1 = 0
     count = 0
@@ -326,11 +507,14 @@ def data_save(img_info, classes, scores, boxes):
         #print(old_data)
         #print('-------------')    
     return new_data , old_count
-
+'''
 def prep_display(dets_out, img, h, w, undo_transform=True, class_color=False, mask_alpha=0.45, fps_str=''):
     """
     Note: If undo_transform=False then im_h and im_w are allowed to be None.
     """
+    global first_frame, old_obj_info
+    name = []
+    mask_img = []
     if undo_transform:
         img_numpy = undo_image_transformation(img, w, h)
         img_gpu = torch.Tensor(img_numpy).cuda()
@@ -358,8 +542,14 @@ def prep_display(dets_out, img, h, w, undo_transform=True, class_color=False, ma
             masks = t[3][idx]
             mask_picture = t[3][idx]
         classes, scores, boxes = [x[idx].cpu().numpy() for x in t[:3]]
+        for i in range(len(classes)):
+            name.append(cfg.dataset.class_names[classes[i]])
+            mask_img.append(mask_picture[i:i+1, :, :, None])
+
+        #obj_info, obj_num = data_save(mask_img, classes, scores, boxes)
         
-        obj_info, obj_num = data_save(mask_picture, classes, scores, boxes)
+        obj_info, obj_num = test111.data_save(mask_img, classes, name, scores, boxes, first_frame, old_obj_info)
+        first_frame = True
         
         
         #print(classes)
@@ -404,10 +594,12 @@ def prep_display(dets_out, img, h, w, undo_transform=True, class_color=False, ma
 
         #mike0225
         mask_img = img_gpu * (masks.sum(dim=0) > 0.5).float() #0209
-        global mask_numpy
+        global mask_numpy 
         mask_numpy = (mask_img * 255).byte().cpu().numpy() #0209
         mask_numpy = cv2.cvtColor(mask_numpy, cv2.COLOR_BGR2GRAY)
         
+        
+
         # Prepare the RGB images for each mask given their color (size [num_dets, h, w, 1])
 
         colors = torch.cat([get_color(j, on_gpu=img_gpu.device.index).view(1, 1, 1, 3) for j in range(num_dets_to_consider)], dim=0)
@@ -436,8 +628,6 @@ def prep_display(dets_out, img, h, w, undo_transform=True, class_color=False, ma
         text_w, text_h = cv2.getTextSize(fps_str, font_face, font_scale, font_thickness)[0]
 
         img_gpu[0:text_h+8, 0:text_w+8] *= 0.6 # 1 - Box alpha
-
-        #mask_img[0:text_h+8, 0:text_w+8] *= 0.6 #0209
     # Then draw the stuff that needs to be done on the cpu
     # Note, make sure this is a uint8 tensor or opencv will not anti alias text for whatever reason
     img_numpy = (img_gpu * 255).byte().cpu().numpy()
@@ -455,21 +645,63 @@ def prep_display(dets_out, img, h, w, undo_transform=True, class_color=False, ma
         return img_numpy
 
     if args.display_text or args.display_bboxes:
-        global  frame_count, state_pre, flag, predict_pos, centerX, centerY, preX, preY, degree
+        global  frame_count, state_pre, flag, predict_pos, centerX, centerY, preX, preY, degree ,mask_color, mask_flag
         frame_count+=1
         
         for j in range(obj_num):
-            #mask_info = obj_info[j][5]
-            
-            global mask_numpy1, img_num, temp_x, temp_y
+            global img_num, temp_x, temp_y, yhat
+            '''
             mask_image = mask_picture[j:j+1, :, :, None]
             mask_image = img_gpu * (mask_image.sum(dim=0) > 0.5).float() #0209
             mask_numpy1 = (mask_image * 255).byte().cpu().numpy() #0209
-            mask_numpy1 = cv2.cvtColor(mask_numpy1, cv2.COLOR_BGR2GRAY)
-
-            
-            if obj_info[j][2] == 1:
+            mask_color = cv2.cvtColor(mask_numpy1, cv2.COLOR_BGR2GRAY)
+            mask_flag = True
+            '''
+            if obj_info[j][2] != 0:
+                
+                
+                #0502-------------------------------------------------------------------
+                mask_image = img_gpu *(obj_info[j][3].sum(dim=0) > 0.5).float()
+                mask_numpy1 = (mask_image * 255).byte().cpu().numpy() 
+                mask_color= cv2.cvtColor(mask_numpy1, cv2.COLOR_BGR2GRAY)
+                mask_flag = True
+                #-------------------------------------------------------------------------
+                
                 if frame_count%10 == 3:
+                    
+                    #-----------------------------
+                    obj_info[j][5].append(mask_color)
+        
+                    #cv2.imwrite('/home/chien/123/test_{}.jpg'.format(j),mask_numpy1)
+                    
+                    if len(obj_info[j][5]) > 2:
+                        '''
+                        for k in range(len(obj_info[j][5])):
+                            cv2.imwrite('/home/chien/123/test_{}.jpg'.format(k),obj_info[j][5][k])
+                        '''    
+                        imagedata1 = np.array(obj_info[j][5])    
+                        
+                        imagedata1=imagedata1.reshape((-1,3,480,640,1))
+                        imagedata1=imagedata1/255.
+                        yhat = model.predict(imagedata1, verbose=0) 
+                        #print(yhat)
+                        
+                        obj_info[j][5].pop(0) #0->1
+                
+                if len(obj_info[j][5]) == 2:
+                    
+                    for i in range(5):
+                        x1 = yhat[1][0][i][1]*320+320
+                        y1 = yhat[1][0][i][2]*240+240
+                        degree1 = arctan_recovery(yhat[1][0][i][3],yhat[1][0][i][4])
+                        temp_x1,temp_y1=trans_degree(x1,y1,degree1)
+                        cv2.circle(img_numpy, (int(x1),int(y1)),5,(0, 0, 255),5)
+                        cv2.line(img_numpy,(int(x1+temp_x1),int(y1+temp_y1)),(int(x1-temp_x1),int(y1-temp_y1)),(0,0,255),5)
+                        
+                    #for k in range(len(obj_info[j][5])):
+                    #    cv2.imwrite('/home/chien/123/test_{}.jpg'.format(k),obj_info[j][5][k])
+                       
+                    #-----------------------------
                     
                     centerX.append(obj_info[j][4][0])
                     centerY.append(obj_info[j][4][1])
@@ -541,13 +773,15 @@ def prep_display(dets_out, img, h, w, undo_transform=True, class_color=False, ma
                     
                     cv2.rectangle(img_numpy, (obj_info[j][4][2], obj_info[j][4][4]), (obj_info[j][4][2] + text_w, obj_info[j][4][4] - text_h - 4), color, -1)
                     cv2.putText(img_numpy, text_str, text_pt, font_face, font_scale, text_color, font_thickness, cv2.LINE_AA)
+            '''
             else:
                 for i in range(2):
                     predict_pos[j][i] = [0]
                 predict_pos[j][2] = []
-
-
-    
+            '''
+        old_obj_info = obj_info
+        #print(old_obj_info)
+        #print('#####################################')
     return img_numpy
 
 
@@ -555,8 +789,7 @@ class Detections:
 
     def __init__(self):
         self.bbox_data = []
-        self.mask_data = []
-
+        self.mask_data 
     def add_bbox(self, image_id:int, category_id:int, bbox:list, score:float):
         """ Note that bbox should be a list or tuple of (x1, y1, x2, y2) """
         bbox = [bbox[0], bbox[1], bbox[2]-bbox[0], bbox[3]-bbox[1]]
@@ -698,18 +931,16 @@ def evalvideo(vid, net:Yolact, out_path:str=None):
             nonlocal frame_buffer, running, num_frames, frames_displayed, vid_done
             while running:
                 frame_time_start = time.time()
-                global mask_numpy, mask_numpy1
+                global mask_numpy, mask_color
                 if not frame_buffer.empty():
                     next_time = time.time()
                       
                     if out_path is None:
-                        #cv2.imshow('test', mask_numpy1)
+                        #if mask_flag==True:
+                        #    cv2.imshow('test', mask_color)
                         #cv2.imshow('123',mask_numpy)
                         
                         cv2.imshow("yolact", frame_buffer.get())
-                        
-                        #aaa = cv2.cvtColor(frame_buffer.get(), cv2.COLOR_BGR2GRAY)
-                        #cv2.imshow('aaaa', aaa)
 
                         '''
                         if cv2.waitKey(33) & 0xFF == ord('s'):
@@ -818,6 +1049,7 @@ def evalvideo(vid, net:Yolact, out_path:str=None):
                 #print('fps', fps)
     except KeyboardInterrupt:
         print('\nStopping...')
+    
     cleanup_and_exit()
 
 def savedata(img):
@@ -831,13 +1063,17 @@ def savedata(img):
 
 
 if __name__ == '__main__':
+    
+    
     global model, take_picture_counter
     take_picture_counter = 0
     parse_args()
     rospy.init_node('eval')
     sub_img = Get_image()
 
-    
+    test111 = Sort_data()
+
+    torch.cuda.empty_cache()
 
     
     if args.config is None:
@@ -848,8 +1084,8 @@ if __name__ == '__main__':
         set_cfg(args.config)
 
     with torch.no_grad():
-        torch.cuda.set_per_process_memory_fraction(0.5,0)
-        torch.cuda.empty_cache()
+        #torch.cuda.set_per_process_memory_fraction(0.5,0)
+        #torch.cuda.empty_cache()
         if not os.path.exists('results'):
             os.makedirs('results')
 
@@ -869,20 +1105,38 @@ if __name__ == '__main__':
         print(' Done.')
         
         #test weight
-        model = tf.keras.models.load_model('/home/iclab/ros_yolact/src/yolact/src/weights/model_0306.h5') 
-        x_input = np.array([[[144., 200.], [154., 200.], [164., 200.]]  ])
-        x_input=x_input/100.
+        '''
+        tf.compat.v1.disable_eager_execution()
+        tf_config=tf.compat.v1.ConfigProto()
+        tf_config.gpu_options.per_process_gpu_memory_fraction = 0.5 #最大使用率
+        sess=tf.compat.v1.Session(config=tf_config)
+        '''
+
+        gpus = tf.config.experimental.list_physical_devices(device_type='GPU')
+        tf.config.experimental.set_virtual_device_configuration(gpus[0],[tf.config.experimental.VirtualDeviceConfiguration(memory_limit=2048)])
+
+        model = tf.keras.models.load_model('/home/chien/CNN/weight/model_0504.h5') 
+        photo_array = []
+        test_img1 = '/home/chien/123/test_0.jpg'#137
+        photo1 = cv2.imread(test_img1,0)
+        test_img2 = '/home/chien/123/test_1.jpg'
+        photo2 = cv2.imread(test_img2,0)
+        test_img3 = '/home/chien/123/test_2.jpg'#1307
+        photo3 = cv2.imread(test_img3,0)
+
+        photo_array.append(photo1)
+        photo_array.append(photo2)
+        photo_array.append(photo3)
+
+        imagedata1 = np.array(photo_array)    
+        imagedata1=imagedata1.reshape((-1,3,480,640,1))
+        imagedata1=imagedata1/255.
+
+        yhat = model.predict(imagedata1, verbose=0)  
+        
+        
 
 
-        '''
-        test_img = '/home/iclab/ros_yolact/src/yolact/src/data_2.jpg'
-        photo= cv2.imread(test_img,0)
-        photo = np.array(photo) 
-        photo = np.expand_dims(photo, axis=0)
-        photo=photo.reshape((-1,480,640,1))
-        photo=photo/255
-        model.predict([photo, x_input], verbose=0)
-        '''
            
         if args.cuda:
             net = net.cuda()
@@ -894,5 +1148,5 @@ if __name__ == '__main__':
         evalvideo(sub_img.cv_image, net)
         
         #evalvideo(vid, net, args.video)
-
+    
 

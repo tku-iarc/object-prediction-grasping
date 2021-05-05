@@ -111,12 +111,12 @@ dataset_base = Config({
     'name': 'test',
 
     # Training images and annotations
-    'train_images': '/home/chien/DataSet/data_dataset_coco',
-    'train_info':   '/home/chien/DataSet/data_dataset_coco/annotations.json',
+    'train_images': '/home/chien/Generate_DataSet/data_dataset_coco',
+    'train_info':   '/home/chien/Generate_DataSet/data_dataset_coco/annotations.json',
 
     # Validation images and annotations.
-    'valid_images': '/home/chien/DataSet/data_dataset_coco',
-    'valid_info':   '/home/chien/DataSet/data_dataset_coco/annotations.json',
+    'valid_images': '/home/chien/Generate_DataSet/data_dataset_coco',
+    'valid_info':   '/home/chien/Generate_DataSet/data_dataset_coco/annotations.json',
 
     # Whether or not to load GT. If this is False, eval.py quantitative evaluation won't work.
     'has_gt': True,
