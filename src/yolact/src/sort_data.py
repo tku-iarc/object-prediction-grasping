@@ -8,6 +8,7 @@ class Sort_data:
     # 2: scorce    5: three mask pictures 
     #----------------------------------------------------------------
     def __init__(self):
+        self.test = 0
         self.data_size = 20
         self.old_dataset = [[ [] for i in range(0)] for j in range(self.data_size)]
         self.origin_data = [[ [] for i in range(0)] for j in range(self.data_size)]
@@ -119,10 +120,9 @@ class Sort_data:
             new_data, self.total_count = self.Compare_Data(old_obj_info, self.compare_data, self.old_obj_count, new_obj_count)    
             #self.origin_data = new_data
             self.old_obj_count = new_obj_count
-
+            self.test = new_data
         return new_data, self.total_count
 
-    #def data_MaskImaage_save(self, data_info, mask_image):
         
         
 

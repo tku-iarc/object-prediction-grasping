@@ -2,14 +2,17 @@
 ###############################mike
 
 #from tensorflow.keras.models import Sequential, model_from_json
-import rospy
 import math
 from get_rs_image import Get_image
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge, CvBridgeError
 import sys
-sys.path.insert(1, "/home/chien/.local/lib/python3.6/site-packages/")
+sys.path.insert(0, "/home/chien/.local/lib/python3.6/site-packages/")
 from sort_data import Sort_data
+import rospy
+from get_rs_image.msg import obj_infomsg
+from get_rs_image.msg import obj_array
+import threading
 ##################################
 from data import COCODetection, get_label_map, MEANS, COLORS
 from yolact import Yolact
@@ -167,10 +170,7 @@ first_frame = False
 
 state_pre = False
 
-realX = []
-realY = []
-preX = []
-preY = []
+
 flag = False
 misx = []
 misy=[] 
@@ -210,6 +210,16 @@ for i in range(20):
         compare_data[i].append([])
 #---------------------------------------------------------------
 
+#0512
+pointx = []
+pointy = []
+real_pointx = []
+real_pointy = []
+point_count = 0
+use_count = 0
+picture_num = 0
+pub_Flag = False
+
 
 def trans_degree(x,y,degree):
     
@@ -230,51 +240,38 @@ def arctan_recovery(cos_x,sin_x):
     target_ang = predict_degree
     return predict_degree
 
-def predict1_next(Img,Px, Py):
-    global model, state_pre
-    x_input = np.array([[  [Px[0],Py[0]], [Px[1],Py[1]],  [Px[2],Py[2]]  ]])
-    x_input = x_input.reshape((1, 3, 2))
-    x_input=x_input/100.
 
-    photo = np.array(Img) 
-    photo = np.expand_dims(photo, axis=0)
-    photo=photo.reshape((-1,480,640,1))
-    photo=photo/255
-    predict_degree, yhat = model.predict([photo, x_input], verbose=0)
-    degree = arctan_recovery(predict_degree[0][0],predict_degree[0][1])
-
-    yhat*=100
-    state_pre = True
-    return degree, yhat
-
-
-def predict_next(Px, Py):
-    global model, state_pre
-    x_input = np.array([[  [Px[0],Py[0]], [Px[1],Py[1]],  [Px[2],Py[2]]  ]])
-    x_input = x_input.reshape((1, 3, 2))
-    x_input=x_input/100.
-    yhat = model.predict(x_input, verbose=0)
-    yhat*=100
-    state_pre = True
-    return yhat
     
 def plot_data(real_posX,real_posY, pre_posX, pre_posY):
-    '''
-    x = (np.sum(misx)/len(misx))
-    y = (np.sum(misy)/len(misy))
-    plt.xlabel('X (Pixel)')
-    plt.ylabel('Y (Pixel)')
-    plt.text(180,218, 'x average error: %f pixel'% x)
-    plt.text(180,216, 'y average error: %f pixel'% y)
-    plt.ylim(185,220)
-    plt.title("Speed : 3.54 cm/s \n (Record every 10 fps )")
-    '''
+    misX = []
+    misY = []
+    T = []   
+    print(len(real_posY))
+    print('----------')
+    print(len(pre_posY)) 
+    for i in range(len(real_posX)-5):
+        misX.append(abs(real_posX[i] - pre_posX[i]))
+        misY.append(abs(real_posY[i] - pre_posY[i]))
+        T.append(i)
     
+    sumx = sum(misX)
+    sumy = sum(misY)
     #plt.plot(real_posX[0], real_posY[0], 'ko')
-    plt.plot(real_posX, real_posY, 'ro--' , label='real_pos')
-    plt.plot(pre_posX, pre_posY, 'bo--', label='pre_pos')
-    plt.legend()
-    plt.savefig('low_speed.png')
+    #plt.plot(misX, T, 'ro--' , label='X')
+    plt.figure(1)
+    plt.xlabel('Times')
+    plt.ylabel('X error (pixel)')
+    plt.title('X average error : {} pixels'.format(round((sumx/len(misX)),3)   ))
+    plt.plot(real_posX, 'r--')
+    plt.savefig('test1.png')
+
+    plt.figure(2)
+    plt.xlabel('Times')
+    plt.ylabel('Y error (pixel)')
+    plt.title('Y average error : {} pixels'.format(round((sumy/len(misY)),3)   ))
+    plt.plot(pre_posX, 'r--')
+    plt.savefig('test2.png')
+    
 
 def Compare_Data(old_data, new_data, old_count, new_count):
     global origin_data
@@ -426,88 +423,10 @@ def data_save( mask_picture, classes, names, scorces, boxes):
         total_count = total_obj
     return compare_data, total_count
 
+def get_req(req):
+    print(req.info_flag)
+    return [10,20,20,30]
 
-'''
-def data_save(img_info, classes, scores, boxes):
-    global old_data, new_data, first_frame, count, old_count
-    
-    new_data = [[ [] for i in range(0)] for j in range(20)]
-    test = [[ [] for i in range(0)] for j in range(20)]
-    for i in range(20):
-        new_data[i] = [i]
-        test[i] = [i]
-        for k in range(3):
-            new_data[i].append(0)
-            test[i].append(0)
-        test[i].append((0,0))
-        new_data[i].append((0,0)) 
-    num = 0
-    num1 = 0
-    count = 0
-    if first_frame == False:
-        for i in range(len(classes)):
-            old_data[i][1] = cfg.dataset.class_names[classes[i]]
-            old_data[i][2] = 1
-            old_data[i][3] = scores[i]
-            x1,y1,x2,y2 = boxes[i, :]
-            old_data[i][4] = [(x1+x2)/2, (y1+y2)/2, x1, x2, y1, y2]
-            #old_data[i][5] = img_info #0306
-            old_count+=1
-            
-        first_frame = True 
-        new_data = old_data   
-    else:
-
-        for i in range(len(classes)):
-            
-            test[i][1] = cfg.dataset.class_names[classes[i]]
-            test[i][2] = 1
-            test[i][3] = scores[i]
-            x1,y1,x2,y2 = boxes[i, :]
-            test[i][4] = [(x1+x2)/2, (y1+y2)/2, x1, x2, y1, y2]
-            #test[i][5] = img_info #0306
-            count +=1
-             
-        #rint('1   : ',test)
-        for i in range(count):
-            testlist = []
-            for j in range(old_count):
-                testlist.append(np.sqrt( pow((test[i][4][0] - old_data[j][4][0]),2) +  pow((test[i][4][1] - old_data[j][4][1]),2) )) 
-            
-            if testlist != []:
-                minid = testlist.index(min(testlist))
-
-                if testlist[minid] < 20:
-                    if test[i][1] == old_data[minid][1]:   
-                        new_data[minid] = test[i]
-                        new_data[minid][0] = minid
-                    else:
-                        
-                        new_data[count+num-1] = test[i]
-                        new_data[count+num-1][0] = count+num-1
-                        num+=1
-                else: 
-
-                    new_data[count+num-1] = test[i]
-                    new_data[count+num-1][0] = count+num-1
-                    num1+=1 
-                    num+=1
-        if num != 0:
-            for i in range(count+num):
-                if new_data[i][2] == 0:
-                    if i < (count+num1 -2):
-                        new_data[i], new_data[count+num1 -2] = new_data[count+num1-2], new_data[i]
-                        new_data[i][0], new_data[count+num1 -2][0] = new_data[count+num1-2][0], new_data[i][0]
-                        num1 -=1
-    
-        old_data = new_data 
-        if count < old_count:
-            count = old_count  
-        old_count = count         
-        #print(old_data)
-        #print('-------------')    
-    return new_data , old_count
-'''
 def prep_display(dets_out, img, h, w, undo_transform=True, class_color=False, mask_alpha=0.45, fps_str=''):
     """
     Note: If undo_transform=False then im_h and im_w are allowed to be None.
@@ -547,15 +466,13 @@ def prep_display(dets_out, img, h, w, undo_transform=True, class_color=False, ma
             mask_img.append(mask_picture[i:i+1, :, :, None])
 
         #obj_info, obj_num = data_save(mask_img, classes, scores, boxes)
-        
-        obj_info, obj_num = test111.data_save(mask_img, classes, name, scores, boxes, first_frame, old_obj_info)
+        start = time.time()
+        obj_info, obj_num = sort_info.data_save(mask_img, classes, name, scores, boxes, first_frame, old_obj_info)
+        end = time.time()
+        print('aaaaaaaaaa', end-start)
         first_frame = True
         
         
-        #print(classes)
-        #print('---------')
-        #np.save('masks.npy', masks.cpu().numpy())
-        #print(obj_info[0][4][0], obj_info[0][4][1])
     num_dets_to_consider = min(args.top_k, classes.shape[0])
     for j in range(num_dets_to_consider):
         if scores[j] < args.score_threshold:
@@ -645,33 +562,30 @@ def prep_display(dets_out, img, h, w, undo_transform=True, class_color=False, ma
         return img_numpy
 
     if args.display_text or args.display_bboxes:
-        global  frame_count, state_pre, flag, predict_pos, centerX, centerY, preX, preY, degree ,mask_color, mask_flag
+        global  frame_count, state_pre, flag, predict_pos, centerX, centerY, degree ,mask_color, mask_flag, pub_Flag
         frame_count+=1
         
+        pub_array_msg = obj_array()
         for j in range(obj_num):
             global img_num, temp_x, temp_y, yhat
-            '''
-            mask_image = mask_picture[j:j+1, :, :, None]
-            mask_image = img_gpu * (mask_image.sum(dim=0) > 0.5).float() #0209
-            mask_numpy1 = (mask_image * 255).byte().cpu().numpy() #0209
-            mask_color = cv2.cvtColor(mask_numpy1, cv2.COLOR_BGR2GRAY)
-            mask_flag = True
-            '''
             if obj_info[j][2] != 0:
-                
                 
                 #0502-------------------------------------------------------------------
                 mask_image = img_gpu *(obj_info[j][3].sum(dim=0) > 0.5).float()
                 mask_numpy1 = (mask_image * 255).byte().cpu().numpy() 
                 mask_color= cv2.cvtColor(mask_numpy1, cv2.COLOR_BGR2GRAY)
-                mask_flag = True
+                '''
+                kernel = np.ones((5,5), np.uint8)
+                mask_color = cv2.erode(mask_color, kernel, iterations = 1)
+                mask_color = cv2.dilate(mask_color, kernel, iterations = 1)
+                '''
+                mask_flag = False
                 #-------------------------------------------------------------------------
                 
-                if frame_count%10 == 3:
-                    
+                if frame_count%20 == 3:
                     #-----------------------------
                     obj_info[j][5].append(mask_color)
-        
+                    mask_flag = True
                     #cv2.imwrite('/home/chien/123/test_{}.jpg'.format(j),mask_numpy1)
                     
                     if len(obj_info[j][5]) > 2:
@@ -679,76 +593,87 @@ def prep_display(dets_out, img, h, w, undo_transform=True, class_color=False, ma
                         for k in range(len(obj_info[j][5])):
                             cv2.imwrite('/home/chien/123/test_{}.jpg'.format(k),obj_info[j][5][k])
                         '''    
+
+                        obj_msg = obj_infomsg()
+                        obj_msg.id = obj_info[j][0]
+                        obj_msg.object_name = obj_info[j][1]
+
+
                         imagedata1 = np.array(obj_info[j][5])    
                         
                         imagedata1=imagedata1.reshape((-1,3,480,640,1))
                         imagedata1=imagedata1/255.
+                        start = time.time()
                         yhat = model.predict(imagedata1, verbose=0) 
-                        #print(yhat)
-                        
-                        obj_info[j][5].pop(0) #0->1
-                
-                if len(obj_info[j][5]) == 2:
-                    
-                    for i in range(5):
-                        x1 = yhat[1][0][i][1]*320+320
-                        y1 = yhat[1][0][i][2]*240+240
-                        degree1 = arctan_recovery(yhat[1][0][i][3],yhat[1][0][i][4])
-                        temp_x1,temp_y1=trans_degree(x1,y1,degree1)
-                        cv2.circle(img_numpy, (int(x1),int(y1)),5,(0, 0, 255),5)
-                        cv2.line(img_numpy,(int(x1+temp_x1),int(y1+temp_y1)),(int(x1-temp_x1),int(y1-temp_y1)),(0,0,255),5)
-                        
-                    #for k in range(len(obj_info[j][5])):
-                    #    cv2.imwrite('/home/chien/123/test_{}.jpg'.format(k),obj_info[j][5][k])
-                       
-                    #-----------------------------
-                    
-                    centerX.append(obj_info[j][4][0])
-                    centerY.append(obj_info[j][4][1])
-
-                    predict_pos[j][0].append(obj_info[j][4][0])
-                    predict_pos[j][1].append(obj_info[j][4][1])
-                    
-                    if predict_pos[j][0][0] == 0:
-                        predict_pos[j][0].pop(0)
-                    if predict_pos[j][1][0] == 0:
-                        predict_pos[j][1].pop(0) 
-
-                    if len(predict_pos[j][0]) > 2:
-                        #predict_pos[j][2] = predict_next( predict_pos[j][0], predict_pos[j][1]) 
-
+                        end = time.time()
                         '''
-                        degree, predict_pos[j][2] = predict1_next( mask_numpy1, predict_pos[j][0], predict_pos[j][1]) # test0227
-                        temp_x,temp_y=trans_degree(predict_pos[j][2][0,4,0],predict_pos[j][2][0,4,1],degree)
+                        print(end-start)
+                        print('---------------')
                         '''
-                        
-                        predict_pos[j][0].pop(0) #0->1
-                        predict_pos[j][1].pop(0)
-                '''
-                if state_pre == True:
-                    
-                    if predict_pos[j][2] != []:
-                        
-                        for i in range(5):
-                            if (predict_pos[j][2][0,i,0]) > 640 or (predict_pos[j][2][0,i,1]) > 480:
-                                pass
-                            else:    
-                                pass
-                                #cv2.circle(img_numpy,(predict_pos[j][2][0,i,0],predict_pos[j][2][0,i,1]),5,(0,0,213),-1)      
-                        cv2.line(img_numpy,(int(obj_info[j][4][0]+temp_x),int(obj_info[j][4][1]+temp_y)),(int(obj_info[j][4][0]-temp_x),int(obj_info[j][4][1]-temp_y)),(0,0,255),3)
-                        
-                        if flag ==False:
+                        if obj_info[j][6] == []:
                             for i in range(5):
-                                preX.append(predict_pos[j][2][0,i,0])
-                                preY.append(predict_pos[j][2][0,i,1])
-                                #preY.append(num)
-                        else:
-                            preX.append(predict_pos[j][2][0,4,0])
-                            preY.append(predict_pos[j][2][0,4,1])
-                            #preY.append(num)
+                                x1 = yhat[1][0][i][1]*320+320
+                                y1 = yhat[1][0][i][2]*240+240
+                                degree1 = arctan_recovery(yhat[1][0][i][3],yhat[1][0][i][4])
+                                temp_x1,temp_y1=trans_degree(x1,y1,degree1)
+                                obj_info[j][6].append((x1,y1,temp_x1,temp_y1))
 
-                        flag = True
-                '''        
+                        else:
+                            for i in range(5):
+                                x1 = yhat[1][0][i][1]*320+320
+                                y1 = yhat[1][0][i][2]*240+240
+                                degree1 = arctan_recovery(yhat[1][0][i][3],yhat[1][0][i][4])
+                                temp_x1,temp_y1=trans_degree(x1,y1,degree1)
+                                obj_info[j][6][i] = (x1,y1,temp_x1,temp_y1)
+                            '''
+                            obj_info[j][6].pop(0)
+                            x1 = yhat[1][0][4][1]*320+320
+                            y1 = yhat[1][0][4][2]*240+240
+                            degree1 = arctan_recovery(yhat[1][0][4][3],yhat[1][0][4][4])
+                            temp_x1,temp_y1=trans_degree(x1,y1,degree1)
+                            obj_info[j][6].append((x1,y1,temp_x1,temp_y1))
+                            '''
+                        obj_msg.x = yhat[1][0][4][1]*320+320  #yhat[1][0][3][1]*320+320
+                        obj_msg.y = yhat[1][0][4][2]*240+240
+                        obj_msg.degree = arctan_recovery(yhat[1][0][4][3],yhat[1][0][4][4])
+                        tx1,ty1=trans_degree(obj_msg.x,obj_msg.y,obj_msg.degree)
+                        '''
+                        print( obj_msg.degree)
+                        cv2.circle(img_numpy, (int(obj_msg.x),int(obj_msg.y)),5,(0, 0, 255),5)
+                        cv2.line(img_numpy,(int(obj_msg.x+tx1),int(obj_msg.y+ty1)),(int(obj_msg.x-tx1),int(obj_msg.y-ty1)),(0,0,255),5)
+                        '''
+                        #print( obj_msg.degree)
+                        pub_array_msg.Obj_list.append(obj_msg)
+
+                        pub_Flag = True
+                        obj_info[j][5].pop(0) #0->1
+
+                    '''
+                    global pointx,pointy,real_pointx,real_pointy, point_count ,use_count
+                    use_count+=1
+                    if use_count >=10:
+                        pointx.append(obj_info[j][6][4][0])
+                        pointy.append(obj_info[j][6][4][1])
+                        point_count += 1
+                        if point_count >= 5:
+                            real_pointx.append(yhat[0][0][2][1]*320+320)
+                            real_pointy.append(yhat[0][0][2][2]*240+240)
+                    '''
+                
+                if obj_info[j][6] != []:
+                    for i in range(5):
+                        px = obj_info[j][6][i][0]
+                        py = obj_info[j][6][i][1]
+                        temp_px = obj_info[j][6][i][2]
+                        temp_py = obj_info[j][6][i][3]
+                        
+                        
+                        cv2.circle(img_numpy, (int(px),int(py)),5,(0, 0, 255),5)
+                        cv2.line(img_numpy,(int(px+temp_px),int(py+temp_py)),(int(px-temp_px),int(py-temp_py)),(0,0,255),5)
+                        
+                    
+                       
+ 
                 color = get_color(obj_info[j][0])
                 score = obj_info[j][3]
                 
@@ -761,6 +686,8 @@ def prep_display(dets_out, img, h, w, undo_transform=True, class_color=False, ma
                     
                     #text_str = '%s: %.2f' % (_class, score) if args.display_scores else _class
                     text_str = '%s: %s' % (obj_info[j][0],_class) if args.display_scores else _class
+                    #text_str = '%s: %s' % (_class, obj_info[j][2]) if args.display_scores else _class
+
 
                     font_face = cv2.FONT_HERSHEY_DUPLEX
                     font_scale = 0.6
@@ -773,16 +700,14 @@ def prep_display(dets_out, img, h, w, undo_transform=True, class_color=False, ma
                     
                     cv2.rectangle(img_numpy, (obj_info[j][4][2], obj_info[j][4][4]), (obj_info[j][4][2] + text_w, obj_info[j][4][4] - text_h - 4), color, -1)
                     cv2.putText(img_numpy, text_str, text_pt, font_face, font_scale, text_color, font_thickness, cv2.LINE_AA)
-            '''
-            else:
-                for i in range(2):
-                    predict_pos[j][i] = [0]
-                predict_pos[j][2] = []
-            '''
+
+        if pub_Flag == True:
+            #print(pub_array_msg)
+            array_pub.publish(pub_array_msg)
+        pub_Flag = False    
         old_obj_info = obj_info
-        #print(old_obj_info)
-        #print('#####################################')
     return img_numpy
+
 
 
 class Detections:
@@ -861,6 +786,8 @@ class Detections:
 from multiprocessing.pool import ThreadPool
 from queue import Queue
 
+
+
 class CustomDataParallel(torch.nn.DataParallel):
     """ A Custom Data Parallel class that properly gathers lists of dictionaries. """
     def gather(self, outputs, output_device):
@@ -931,15 +858,22 @@ def evalvideo(vid, net:Yolact, out_path:str=None):
             nonlocal frame_buffer, running, num_frames, frames_displayed, vid_done
             while running:
                 frame_time_start = time.time()
-                global mask_numpy, mask_color
+                global mask_numpy, mask_color , picture_num
                 if not frame_buffer.empty():
                     next_time = time.time()
                       
                     if out_path is None:
-                        #if mask_flag==True:
-                        #    cv2.imshow('test', mask_color)
+                        '''
+                        if mask_flag==True:
+                            
+                            cv2.imwrite('/home/chien/123/mask/slide/Danboard/mask_{}.jpg'.format(picture_num),mask_color)
+                            cv2.imwrite('/home/chien/123/color/slide/Danboard/color_{}.jpg'.format(picture_num),frame_buffer.get())
+                            picture_num+=1
+                            
+                            cv2.imshow('test', mask_color)
                         #cv2.imshow('123',mask_numpy)
-                        
+                        '''
+                        #cv2.imshow('123',mask_numpy)
                         cv2.imshow("yolact", frame_buffer.get())
 
                         '''
@@ -965,8 +899,8 @@ def evalvideo(vid, net:Yolact, out_path:str=None):
                     '''  
 
                     '''
-                    global centerX, centerY , preX, preY
-                    plot_data(centerX, centerY, preX, preY)
+                    global pointx,pointy,real_pointx,real_pointy
+                    plot_data(real_pointx, real_pointy, pointx, pointy)
                     '''
   
                     # Press Escape to close
@@ -986,10 +920,15 @@ def evalvideo(vid, net:Yolact, out_path:str=None):
     print('Initializing model... ', end='')
     first_batch = eval_network(transform_frame(get_next_frame(vid)))
     print('Done.')
-
+    
+    '''
+    t = threading.Thread(target = info_topic)
+    t.start()
+    '''
     # For each frame the sequence of functions it needs to go through to be processed (in reversed order)
     sequence = [prep_frame, eval_network, transform_frame]
     pool = ThreadPool(processes=len(sequence) + args.video_multiframe + 2)
+
     pool.apply_async(play_video)
     active_frames = [{'value': extract_frame(first_batch, i), 'idx': 0} for i in range(len(first_batch[0]))]
     print()
@@ -998,7 +937,7 @@ def evalvideo(vid, net:Yolact, out_path:str=None):
     try:
         
         while running:
-           
+            
             # Hard limit on frames in buffer so we don't run out of memory >.>
             while frame_buffer.qsize() > 100:
                 time.sleep(0.001)
@@ -1065,17 +1004,18 @@ def savedata(img):
 if __name__ == '__main__':
     
     
-    global model, take_picture_counter
+    global model, take_picture_counter, pub
     take_picture_counter = 0
     parse_args()
-    rospy.init_node('eval')
+    rospy.init_node('YOLACT')
     sub_img = Get_image()
 
-    test111 = Sort_data()
+    array_pub = rospy.Publisher('info_topic', obj_array, queue_size = 10)
 
+    sort_info = Sort_data()
     torch.cuda.empty_cache()
 
-    
+
     if args.config is None:
         model_path = SavePath.from_str(args.trained_model)
         # TODO: Bad practice? Probably want to do a name lookup instead.
@@ -1105,23 +1045,20 @@ if __name__ == '__main__':
         print(' Done.')
         
         #test weight
-        '''
-        tf.compat.v1.disable_eager_execution()
-        tf_config=tf.compat.v1.ConfigProto()
-        tf_config.gpu_options.per_process_gpu_memory_fraction = 0.5 #最大使用率
-        sess=tf.compat.v1.Session(config=tf_config)
-        '''
+        
 
         gpus = tf.config.experimental.list_physical_devices(device_type='GPU')
         tf.config.experimental.set_virtual_device_configuration(gpus[0],[tf.config.experimental.VirtualDeviceConfiguration(memory_limit=2048)])
 
-        model = tf.keras.models.load_model('/home/chien/CNN/weight/model_0504.h5') 
+        model = tf.keras.models.load_model('/home/chien/CNN/weight/model_0629.h5') #0618.h5
+        
         photo_array = []
-        test_img1 = '/home/chien/123/test_0.jpg'#137
+        
+        test_img1 = '/home/chien/123/mask/bottle/mask_0.jpg'#137
         photo1 = cv2.imread(test_img1,0)
-        test_img2 = '/home/chien/123/test_1.jpg'
+        test_img2 = '/home/chien/123/mask/bottle/mask_1.jpg'
         photo2 = cv2.imread(test_img2,0)
-        test_img3 = '/home/chien/123/test_2.jpg'#1307
+        test_img3 = '/home/chien/123/mask/bottle/mask_2.jpg'#1307
         photo3 = cv2.imread(test_img3,0)
 
         photo_array.append(photo1)
@@ -1146,7 +1083,7 @@ if __name__ == '__main__':
         cfg.mask_proto_debug = args.mask_proto_debug   
 
         evalvideo(sub_img.cv_image, net)
-        
+
         #evalvideo(vid, net, args.video)
     
 

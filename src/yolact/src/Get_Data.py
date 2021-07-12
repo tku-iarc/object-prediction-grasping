@@ -32,7 +32,9 @@ if __name__ == '__main__':
     rospy.init_node('Get_Data')
     
     while not rospy.is_shutdown():
-        image = cv2.circle(sub_img.cv_image,(320, 240), 5, (0, 0, 255), -1)
+        image = cv2.circle(sub_img.cv_image,(320, 240), 3, (0, 0, 255), -1)
+        cv2.circle(sub_img.cv_image,(520, 240), 3, (0, 0, 255), -1)
+        cv2.circle(sub_img.cv_image,(320, 340), 3, (0, 0, 255), -1)
         #image = cv2.cvtColor( sub_img.cv_image, cv2.COLOR_BGR2GRAY)
         cv2.imshow('aaa', sub_img.cv_image)
         cv2.waitKey(1)

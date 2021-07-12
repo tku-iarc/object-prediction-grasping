@@ -1,0 +1,1 @@
+obj_infomsg[] Obj_list
