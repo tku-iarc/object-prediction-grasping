@@ -4,6 +4,8 @@ result
 catkin_workspace/
 *.pth
 *.pyc
+*.h5
+*.log
 devel/
 build/
 .catkin_workspace
